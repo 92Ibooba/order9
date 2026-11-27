@@ -1,0 +1,1 @@
+{"name":"order","type":"module","private":true,"engines":{"node":">=22.13"},"scripts":{"start":"node --env-file=.env server.js"},"dependencies":{"express":"^4.21.2"}}
