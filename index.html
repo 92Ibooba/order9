@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Order</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0F5257">
+<link rel="icon" href="icon.svg">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;700;800&display=swap">
+<style>
+:root{--bg:#F6F3EC;--card:#fff;--ink:#14302F;--mute:#5E7270;--teal:#0F5257;--sun:#FFC531;--line:#E2DDD0;--ok:#1E8A4C;--bad:#C2410C}
+@media (prefers-color-scheme:dark){:root{--bg:#0E1B1B;--card:#162828;--ink:#EAF2EF;--mute:#9DB3AF;--teal:#4FB3AD;--line:#2A4040;color-scheme:dark}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 "Bricolage Grotesque",system-ui,sans-serif;max-width:520px;margin-inline:auto;padding:env(safe-area-inset-top,0) 0 96px}
+header{display:flex;justify-content:space-between;align-items:center;padding:16px 16px 8px}
+h1{font-size:22px;margin:0;font-weight:800}h2{font-size:18px;margin:18px 0 8px}
+main{padding:0 16px}
+#map{height:240px;border-radius:18px;margin:0 16px;border:1px solid var(--line);z-index:0}
+.pts{background:var(--sun);color:#14302F;border:0;border-radius:99px;padding:8px 14px;font:inherit;font-weight:800;min-height:40px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px;margin-bottom:10px}
+.row{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.name{font-weight:700;font-size:17px}.sub{color:var(--mute);font-size:14px}
+.code{font-family:ui-monospace,Menlo,monospace;font-size:18px;background:var(--bg);border-radius:10px;padding:8px 10px;margin-top:8px;display:flex;justify-content:space-between;align-items:center}
+button{font:inherit;cursor:pointer}
+.btn{background:var(--teal);color:#fff;border:0;border-radius:14px;padding:14px;font-weight:700;width:100%;min-height:48px}
+@media (prefers-color-scheme:dark){.btn{color:#0E1B1B}}
+.btn.s{width:auto;padding:10px 14px;min-height:44px}
+.link{background:none;border:0;color:var(--mute);text-decoration:underline;padding:8px 0;font-size:14px}
+label{display:block;font-weight:600;margin:12px 0 4px}
+input,select{width:100%;font:inherit;padding:13px;border-radius:12px;border:1.5px solid var(--line);background:var(--card);color:var(--ink);min-height:48px}
+.chk{display:flex;gap:10px;font-weight:500}.chk input{width:22px;min-height:22px}
+nav{position:fixed;bottom:0;left:0;right:0;max-width:520px;margin:auto;display:flex;background:var(--card);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom,0)}
+nav button{flex:1;background:none;border:0;padding:12px 4px;color:var(--mute);font-weight:600;min-height:56px}
+nav button.on{color:var(--teal);box-shadow:inset 0 3px 0 var(--sun)}
+.pack{display:flex;justify-content:space-between;width:100%;margin-bottom:8px;background:var(--card);border:1.5px solid var(--line);border-radius:14px;padding:14px;color:var(--ink);min-height:52px}
+.pack.on{border-color:var(--teal);box-shadow:0 0 0 2px var(--teal)}
+.toast{position:fixed;left:16px;right:16px;bottom:100px;max-width:488px;margin:auto;background:var(--ink);color:var(--bg);padding:14px;border-radius:14px;font-weight:600;z-index:999}
+.pos{color:var(--ok)}.neg{color:var(--bad)}
+.tag{font-size:13px;border-radius:99px;padding:4px 10px;font-weight:700;white-space:nowrap}.tag.ok{background:#DDF3E6;color:#1E8A4C}.tag.no{background:#FFE9D6;color:#C2410C}
+</style>
+</head>
+<body>
+<header><h1>Order</h1><button class="pts" id="pts" hidden></button></header>
+<div id="map" hidden></div>
+<main id="app"></main>
+<nav hidden><button data-t="map">Carte</button><button data-t="add">Ajouter</button><button data-t="wallet">Portefeuille</button></nav>
+<div id="toast" class="toast" hidden></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<script>
+const $=s=>document.querySelector(s),esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const PACKS=[{p:100,f:500},{p:500,f:2000},{p:1000,f:3500}];
+const S={tab:'map',step:'phone',mode:'signup',name:'',to:'',scan:null,prefill:null,phone:'',wifis:[],me:{balance:0,history:[]},pack:null,op:'wave'};
+let ME={lat:12.6392,lon:-8.0029},TOKEN=localStorage.getItem('t'),map,layer;
+const dist=d=>d<1000?d+' m':(d/1000).toFixed(1)+' km';
+function toast(m){const t=$('#toast');t.textContent=m;t.hidden=false;clearTimeout(toast.h);toast.h=setTimeout(()=>t.hidden=true,3000)}
+async function api(p,o={}){
+ const r=await fetch(p,{...o,headers:{'Content-Type':'application/json',...(TOKEN?{Authorization:'Bearer '+TOKEN}:{})},body:o.body?JSON.stringify(o.body):undefined});
+ const d=await r.json().catch(()=>({}));
+ if(r.status===401&&TOKEN)logout();
+ if(!r.ok)throw new Error(d.error||'Erreur réseau');return d}
+const act=fn=>async(...a)=>{try{await fn(...a)}catch(e){toast(e.message)}};
+const reqOtp=act(async()=>{S.phone=$('#ph').value;S.name=$('#nm')?$('#nm').value:S.name;const d=await api('/api/auth/request',{method:'POST',body:{phone:S.phone,mode:S.mode,name:S.name}});S.to=d.to;S.step='code';render();toast('Code envoyé par SMS.')});
+const verify=act(async()=>{const d=await api('/api/auth/verify',{method:'POST',body:{phone:S.phone,code:$('#cd').value.trim(),mode:S.mode,name:S.name}});TOKEN=d.token;localStorage.setItem('t',TOKEN);await load()});
+function logout(){TOKEN=null;localStorage.removeItem('t');S.step='phone';S.mode='login';render()}
+const load=act(async()=>{const[w,m]=await Promise.all([api(`/api/wifis?lat=${ME.lat}&lon=${ME.lon}`),api('/api/me')]);S.wifis=w;S.me=m;render()});
+const unlock=act(async id=>{await api(`/api/wifis/${id}/unlock`,{method:'POST'});toast('Code débloqué !');await load()});
+const report=act(async id=>{await api(`/api/wifis/${id}/report`,{method:'POST'});toast('Merci, signalement envoyé.')});
+const remove=act(async id=>{await api('/api/wifis/'+id,{method:'DELETE'});toast('Ton Wi-Fi a été retiré.');await load()});
+const add=act(async()=>{
+ const d=await api('/api/wifis',{method:'POST',body:{name:$('#n').value,code:$('#c').value,type:$('#t').value,quarter:$('#q').value,lat:ME.lat,lon:ME.lon,consent:$('#ok').checked,bssid:S.prefill?.bssid}});
+ S.tab='map';S.prefill=null;toast(d.gain?'Wi-Fi ajouté : +'+d.gain+' points'+(d.capReached?' (limite de 15 points atteinte pour aujourd’hui)':''):'Wi-Fi ajouté. Limite de 15 points atteinte pour aujourd’hui.');await load()});
+const buy=act(async()=>{
+ if(!S.pack)throw new Error('Choisis un pack.');
+ const d=await api('/api/payments',{method:'POST',body:{provider:S.op,points:S.pack.p}});
+ window.open(d.redirect_url,'_blank');toast('Termine le paiement dans l’application.');
+ const t=setInterval(async()=>{try{const s=await api('/api/payments/'+d.payment_id);
+  if(s.status==='paid'){clearInterval(t);S.pack=null;toast('Paiement confirmé !');load()}else if(s.status==='failed'){clearInterval(t);toast('Paiement annulé ou échoué.')}}catch(e){}},3000);
+ setTimeout(()=>clearInterval(t),180000)});
+const scanNow=act(async()=>{
+ if(!window.OrderNative||!window.OrderNative.scanWifi)throw new Error('La détection automatique fonctionne dans l’application Android Order, pas dans le navigateur.');
+ const nets=await window.OrderNative.scanWifi();
+ S.scan=await api('/api/scan',{method:'POST',body:{lat:ME.lat,lon:ME.lon,networks:nets}});render()});
+function fill(i){const n=S.scan[i];S.prefill={name:n.ssid,bssid:n.bssid};S.tab='add';render()}
+function vScan(){return `<button class="btn" onclick="scanNow()">Chercher les Wi-Fi autour de moi</button>`+(window.OrderNative?'':'<p class="sub">Sur navigateur, la détection est impossible : seule l’application Android peut voir les Wi-Fi autour de toi.</p>')+(S.scan?`<h2>Détectés autour de toi</h2>${S.scan.length?'':'<div class="card sub">Aucun Wi-Fi détecté.</div>'}`+S.scan.map((n,i)=>{const w=S.wifis.find(x=>x.id===n.wifiId),r=n.status==='registered';
+ return `<div class="card"><div class="row"><div><div class="name">${esc(n.ssid)}</div><div class="sub">Signal : ${n.level??'?'} dBm</div></div><span class="tag ${r?'ok':'no'}">${r?'Enregistré':'Non enregistré'}</span></div>`+
+ (r?(w&&w.unlocked?`<div class="code"><span>${esc(w.code)}</span></div>`:`<button class="btn" style="margin-top:10px" onclick="unlock(${n.wifiId})">Débloquer pour 15 points</button>`):`<button class="btn" style="margin-top:10px" onclick="fill(${i})">Enregistrer ce Wi-Fi (+3 points)</button>`)+`</div>`}).join(''):'')}
+function vLogin(){const su=S.mode==='signup';return S.step==='phone'?`<h2>${su?'Créer mon compte':'Connexion'}</h2><p class="sub">${su?'Un seul compte par numéro de téléphone. Tu reçois 20 points offerts.':'Entre ton numéro. Tu recevras un code par SMS.'}</p>
+ ${su?`<label for="nm">Ton nom ou pseudo</label><input id="nm" maxlength="30" value="${esc(S.name)}">`:''}
+ <label for="ph">Numéro de téléphone</label><input id="ph" type="tel" inputmode="tel" placeholder="76 00 00 00" value="${esc(S.phone)}">
+ <button class="btn" style="margin-top:14px" onclick="reqOtp()">Recevoir le code</button>
+ <button class="link" onclick="S.mode='${su?'login':'signup'}';render()">${su?'J’ai déjà un compte : me connecter':'Pas de compte : en créer un'}</button>`
+ :`<h2>Code reçu par SMS</h2><p class="sub">Envoyé au ${esc(S.phone)}</p><label for="cd">Code à 6 chiffres</label><input id="cd" inputmode="numeric" maxlength="6">
+ <button class="btn" style="margin-top:14px" onclick="verify()">Valider</button><button class="link" onclick="S.step='phone';render()">Changer de numéro</button>`}
+function vMap(){return vScan()+`<h2>Wi-Fi enregistrés à proximité</h2>`+(S.wifis.length?S.wifis.map(w=>`<div class="card"><div class="row"><div><div class="name">${esc(w.name)}</div><div class="sub">${esc(w.quarter)} · ${dist(w.distance)}</div></div><span class="sub">${esc(w.type)}</span></div>
+ <div class="sub" style="margin-top:6px">${w.confirmations} personnes l’ont utilisé</div>
+ <a class="link" style="display:inline-block" href="https://www.google.com/maps/dir/?api=1&amp;destination=${w.lat},${w.lon}&amp;travelmode=walking" target="_blank" rel="noopener">Itinéraire à pied</a>
+ ${w.unlocked?`<div class="code"><span>${esc(w.code)}</span><button class="btn s" onclick="navigator.clipboard.writeText(S.wifis.find(x=>x.id==${w.id}).code);toast('Code copié')">Copier</button></div>
+ ${w.mine?`<button class="link" onclick="remove(${w.id})">Retirer mon Wi-Fi</button>`:`<button class="link" onclick="report(${w.id})">Signaler : ne marche plus</button>`}`
+ :`<div class="code">••••••••</div><button class="btn" style="margin-top:10px" onclick="unlock(${w.id})">Débloquer pour 15 points</button>`}</div>`).join(''):'<div class="card sub">Aucun Wi-Fi à moins de 10 km. Ajoute le premier !</div>')}
+function vAdd(){return `<h2>Ajouter un Wi-Fi</h2><p class="sub">Il sera placé à ta position actuelle. Tu gagnes 3 points par Wi-Fi ajouté, jusqu’à 15 points par jour.</p>
+ <label for="n">Nom du réseau</label><input id="n" value="${esc(S.prefill?.name||'')}"><label for="c">Code Wi-Fi</label><input id="c">
+ <label for="t">Type de lieu</label><select id="t"><option>Café</option><option>Restaurant</option><option>Hôtel</option><option>Boutique</option><option>Maison</option></select>
+ <label for="q">Quartier</label><input id="q" placeholder="Ex : Badalabougou">
+ <label class="chk"><input type="checkbox" id="ok"> J’ai l’autorisation de partager ce Wi-Fi</label>
+ <button class="btn" style="margin-top:16px" onclick="add()">Partager ce Wi-Fi</button>`}
+function vWallet(){return `<div class="card" style="background:var(--teal);color:#fff;border:0"><div class="sub" style="color:#cfe6e3">Mon solde</div><div style="font-size:40px;font-weight:800">${S.me.balance} points</div></div>
+ <h2>Acheter des points</h2>${PACKS.map(k=>`<button class="pack ${S.pack?.p===k.p?'on':''}" onclick="S.pack=PACKS.find(x=>x.p===${k.p});render()"><b>${k.p} points</b><span>${k.f} FCFA</span></button>`).join('')}
+ <label for="op">Moyen de paiement</label><select id="op" onchange="S.op=this.value"><option value="wave" ${S.op==='wave'?'selected':''}>Wave</option><option value="orange" ${S.op==='orange'?'selected':''}>Orange Money</option></select>
+ <button class="btn" style="margin-top:14px" onclick="buy()">Payer</button>
+ <h2>Historique</h2>${S.me.history.map(h=>`<div class="card row"><span>${esc(h.reason)}</span><b class="${h.delta>0?'pos':'neg'}">${h.delta>0?'+':''}${h.delta}</b></div>`).join('')}
+ <button class="link" onclick="logout()">Se déconnecter</button>`}
+function drawMap(){
+ const m=$('#map');m.hidden=!TOKEN||S.tab!=='map';if(m.hidden||typeof L==='undefined')return;
+ if(!map){map=L.map('map').setView([ME.lat,ME.lon],14);L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'}).addTo(map);layer=L.layerGroup().addTo(map)}
+ map.invalidateSize();layer.clearLayers();
+ L.circleMarker([ME.lat,ME.lon],{radius:8,color:'#2563EB',fillOpacity:.9}).addTo(layer);
+ S.wifis.forEach(w=>L.circleMarker([w.lat,w.lon],{radius:9,color:w.unlocked?'#1E8A4C':'#0F5257',fillOpacity:.9}).bindPopup(esc(w.name)).addTo(layer))}
+function render(){
+ $('#pts').hidden=!TOKEN;$('#pts').textContent=S.me.balance+' pts';$('nav').hidden=!TOKEN;
+ document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on',b.dataset.t===S.tab));
+ $('#app').innerHTML=!TOKEN?vLogin():S.tab==='map'?vMap():S.tab==='add'?vAdd():vWallet();
+ drawMap()}
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{S.tab=b.dataset.t;render()});
+$('#pts').onclick=()=>{S.tab='wallet';render()};
+navigator.geolocation?.getCurrentPosition(p=>{ME={lat:p.coords.latitude,lon:p.coords.longitude};if(map)map.setView([ME.lat,ME.lon],14);if(TOKEN)load()},()=>toast('Position non autorisée. Autorise la localisation pour Order dans les réglages du navigateur.'),{enableHighAccuracy:true});
+render();if(TOKEN)load();
+</script>
+</body>
+</html>
